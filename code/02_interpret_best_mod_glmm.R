@@ -9,6 +9,7 @@ library(gridExtra)
 
 spatial_buffer <- 250
 n_targeted_cameras <- 20
+targeted_pts_distance <- 75
 
 source("code/modsel_helper.R")
 
@@ -105,12 +106,22 @@ for (i in 1:nrow(scaling_factors)) {
 
 predicted <- predict(best_fit, type = "response", newdata = newdata, re.form = NA)
 
+predicted_link <- predict(best_fit, type = "link", newdata = newdata, re.form = NA, se.fit = TRUE)
+
+predicted_link$fit
+predicted_link$se
 
 newdata$point_pred <-  predicted
 
 
 predicted_raster <- covar_brick_sm[[1]]
+predicted_raster_link <- covar_brick_sm[[1]]
+predicted_raster_se <- covar_brick_sm[[1]]
+
 values(predicted_raster)[!is.na(values(predicted_raster))] <- newdata$point_pred
+
+values(predicted_raster_link)[!is.na(values(predicted_raster_link))] <- unlist(predicted_link$fit)
+values(predicted_raster_se)[!is.na(values(predicted_raster_se))] <- unlist(predicted_link$se)
 
 snapshot_pts <- read_csv("data/SM_2024_full_grid.csv") %>% 
   mutate(type = "Systematic") %>% 
@@ -119,6 +130,8 @@ snapshot_pts <- read_csv("data/SM_2024_full_grid.csv") %>%
        crs = "+proj=longlat") %>% 
   project(crs(predicted_raster))
 
+predicted_raster_of <- predicted_raster_link
+values(predicted_raster_of) <- plogis(values(predicted_raster_link) - 1.96*values(predicted_raster_se))
 
 pred_plot <- ggplot() +
   geom_spatraster(data = predicted_raster) +
@@ -144,7 +157,7 @@ if (plot_all_covars) {
 
 #### Choose the targeted points! ####
 targeted_points_df <- data.frame(x = numeric(0), y = numeric(0))
-temp_pred_ras <- predicted_raster
+temp_pred_ras <- predicted_raster_of
 for (i in 1:n_targeted_cameras) {
   # Find the point with the highest predicted value
   best_cell <- which(values(temp_pred_ras) == max(values(temp_pred_ras), na.rm = T))
@@ -181,7 +194,7 @@ panel_a <- ggplot() +
   geom_spatraster(data = predicted_raster) +
   geom_spatvector(data = all_pts, 
                   aes(color = type), size = 3, pch = 18) +
-  scale_fill_viridis_c("Det. prob.", option = "mako") +
+  scale_fill_viridis_c("Obs. prob.", option = "mako") +
   # ggtitle("Predicted prob. of detecting a bobcat on a 10-day survey") +
   scale_color_manual("Array type", values = c("#E09F3E", "#D33F49")) +
   theme_minimal() +
